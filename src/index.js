@@ -13,17 +13,10 @@ import {
   MultiHook,
 } from "tapable";
 
-import Router from "./plugins/router";
-
-import GetPageData from "./plugins/pageData";
-
-import Render from "./plugins/render";
-
 function generateFlowNode(hook, fns, namespace = "default") {
   if (!hook || !fns) {
     return false;
   }
-
   fns &&
     fns.forEach((row) => {
       const [_name, _handler] = row;
@@ -31,54 +24,52 @@ function generateFlowNode(hook, fns, namespace = "default") {
     });
 }
 
-// AsyncSeriesBailHook
-const mainWorkFlow = new AsyncSeriesHook(["context"]);
-
-const ctx = (function () {
-  const data = {
-    abc: "test",
-  };
-  return {
-    get: function (key) {
-      if (!key) {
-        throw new Error("read context key is required~");
-      }
-      return data[key];
-    },
-    set: function (value, key, prop) {
-      if (!key) {
-        throw new Error("write context key is required~");
-      }
-      console.log(key);
-    },
-  };
-})();
-
-[Router, GetPageData, Render].forEach((middleware) => {
-  const [middlewareName, middlewareOptions] = middleware;
-
-  mainWorkFlow.tapPromise(middlewareName, (ctx) => {
-    return new Promise((resolve) => {
-      const { beforeHandlers, bailApplyHandlers, afterHandlers } =
-        middlewareOptions;
-
-      const beforeHooks = new AsyncSeriesHook(["context"]);
-      const afterHooks = new AsyncSeriesHook(["context"]);
-      const applyHooks = new AsyncSeriesBailHook(["context"]);
-
-      generateFlowNode(beforeHooks, beforeHandlers, middlewareName);
-
-      generateFlowNode(applyHooks, bailApplyHandlers, middlewareName);
-
-      generateFlowNode(afterHooks, afterHandlers, middlewareName);
-
-      beforeHooks
-        .promise(ctx)
-        .then(() => applyHooks.promise(ctx))
-        .then(() => afterHooks.promise(ctx))
-        .then(resolve);
+function initFlow(flowConfigs) {
+  const mainWorkFlow = new AsyncSeriesHook(["context"]);
+  const hook_params_define = ["context"];
+  if (
+    Object.prototype.toString.call(flowConfigs) !== "[object Array]" ||
+    flowConfigs.length === 0
+  ) {
+    throw new Error("flow config error!");
+  }
+  flowConfigs.forEach((middleware) => {
+    const [middlewareName, middlewareOptions] = middleware;
+    mainWorkFlow.tapPromise(middlewareName, (ctx) => {
+      return new Promise((resolve) => {
+        if (
+          Object.prototype.toString.call(middlewareOptions) !== "[object Array]"
+        ) {
+          throw new Error("flow type error!");
+        }
+        const flowNodes = [];
+        middlewareOptions.forEach((row) => {
+          let hooker;
+          const [name, handlers, configs = {}] = row;
+          if (configs.type === "AsyncSeriesBailHook") {
+            hooker = new AsyncSeriesBailHook(hook_params_define);
+          } else {
+            hooker = new AsyncSeriesHook(hook_params_define);
+          }
+          flowNodes.push(hooker);
+          generateFlowNode(hooker, handlers, `${middlewareName}@${name}`);
+        });
+        flowNodes.reduce((preNode, curNode, index) => {
+          if (!preNode) {
+            return curNode.promise(ctx);
+          }
+          const _def = preNode.then(() => curNode.promise(ctx));
+          if (index === flowNodes.length - 1) {
+            _def.then(resolve);
+          }
+          return _def;
+        }, null);
+      });
     });
   });
-});
+  return mainWorkFlow;
+}
 
-mainWorkFlow.promise(ctx);
+export default function run(flowConfigs, ctx) {
+  initFlow(flowConfigs).promise(ctx);
+}
