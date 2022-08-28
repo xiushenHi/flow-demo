@@ -33,26 +33,24 @@ function initFlow(flowConfigs) {
   ) {
     throw new Error("flow config error!");
   }
-  flowConfigs.forEach((middleware) => {
-    const [middlewareName, middlewareOptions] = middleware;
-    mainWorkFlow.tapPromise(middlewareName, (ctx) => {
+  flowConfigs.forEach((flowNode) => {
+    const [flowNodeName, flowAopDefs] = flowNode;
+    mainWorkFlow.tapPromise(flowNodeName, (ctx) => {
       return new Promise((resolve) => {
-        if (
-          Object.prototype.toString.call(middlewareOptions) !== "[object Array]"
-        ) {
+        if (Object.prototype.toString.call(flowAopDefs) !== "[object Array]") {
           throw new Error("flow type error!");
         }
         const flowNodes = [];
-        middlewareOptions.forEach((row) => {
+        flowAopDefs.forEach((aop) => {
           let hooker;
-          const [name, handlers, configs = {}] = row;
+          const [aopName, handlers, configs = {}] = aop;
           if (configs.type === "AsyncSeriesBailHook") {
             hooker = new AsyncSeriesBailHook(hook_params_define);
           } else {
             hooker = new AsyncSeriesHook(hook_params_define);
           }
           flowNodes.push(hooker);
-          generateFlowNode(hooker, handlers, `${middlewareName}@${name}`);
+          generateFlowNode(hooker, handlers, `${flowNodeName}@${aopName}`);
         });
         flowNodes.reduce((preNode, curNode, index) => {
           if (!preNode) {
